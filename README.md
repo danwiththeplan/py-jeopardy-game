@@ -33,7 +33,7 @@ Clone the repository and install the dependencies:
 ```shell
 git clone https://github.com/danwiththeplan/py-jeopardy-game.git
 cd py-jeopardy-game
-poetry install --no-root
+poetry install
 ```
 
 Poetry creates a virtual environment for the project and installs pygame into it. You only need to do this once.
@@ -101,14 +101,14 @@ Here is a complete 3×3 example:
 ```csv
 Row,Col,Question,Answer,Categories
 1,0,The basic unit of life,The cell,Cells
-2,0,The organelle that releases energy from glucose,Mitochondrion,Genetics
-3,0,The process by which a cell divides to make two identical cells,Mitosis,Ecology
-1,1,The molecule that carries genetic information,DNA,
-2,1,An alternative form of a gene,Allele,
-3,1,Having two different alleles for a gene,Heterozygous,
-1,2,An organism that makes its own food,Producer,
-2,2,All the populations living in one area,Community,
-3,2,The role an organism plays in its ecosystem,Niche,
+2,0,The organelle that releases energy from glucose,Mitochondrion,Cells
+3,0,The process by which a cell divides to make two identical cells,Mitosis,Cells
+1,1,The molecule that carries genetic information,DNA,Genetics
+2,1,An alternative form of a gene,Allele,Genetics
+3,1,Having two different alleles for a gene,Heterozygous,Genetics
+1,2,An organism that makes its own food,Producer,Ecology
+2,2,All the populations living in one area,Community,Ecology
+3,2,The role an organism plays in its ecosystem,Niche,Ecology
 ```
 
 A few tips:
