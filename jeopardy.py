@@ -6,14 +6,15 @@ Dependencies are managed with Poetry (see pyproject.toml). Install once with
 `poetry install`, then run the game with `poetry run` in front of the usual
 command:
 
-    poetry run python jeopardy.py myset.csv
-    poetry run python jeopardy.py myset.csv --check            # validate the file only
-    poetry run python jeopardy.py myset.csv --teams "Kea,Weta" --time 45
-    poetry run python jeopardy.py round1.csv,round2.csv,final.csv   # three rounds, in order
-    poetry run python jeopardy.py myset.csv --ticktock ""      # no ticking clock
+    poetry run jeopardy myset.csv
+    poetry run jeopardy myset.csv --check            # validate the file only
+    poetry run jeopardy myset.csv --teams "Kea,Weta" --time 45
+    poetry run jeopardy round1.csv,round2.csv,final.csv   # three rounds, in order
+    poetry run jeopardy myset.csv --ticktock ""      # no ticking clock
+    poetry run jeopardy myset.csv --buzzer ""        # no buzzer
 
-(If a `jeopardy` script entry point is defined in pyproject.toml, `poetry run
-jeopardy myset.csv` works the same way, without "python" in front.)
+(`poetry run python jeopardy.py myset.csv` works the same way, if you'd
+rather call the script directly.)
 
 While a question's timer is running, ticktock.wav (or the --ticktock file)
 loops in the background, if it exists. It stops when the answer is revealed,
@@ -39,11 +40,10 @@ taken from the file: the number of columns is the highest Col plus one,
 the number of rows is the highest Row.
 
 Controls:
-        qset_human_origins.csv
-        qset_plant_animal_responses.csv
     Click a team at the bottom            -> that team is answering
     Click a value on the board            -> question appears, timer starts
     Click the question / SPACE            -> reveal the answer
+    P                                      -> pause / resume the timer
     CORRECT / WRONG buttons, or Y / N     -> score it and go back to the board
     Click another team while a question is up -> steals it for that team
     ESC back to the board   R restart timer   F fullscreen   Q quit
@@ -320,6 +320,8 @@ class Game(object):
         self.current = None
         self.started = 0.0
         self.buzzed = False
+        self.paused = False
+        self.pause_started = 0.0
         self.fullscreen = False
         self.confirm_until = 0.0        # END ROUND / FINISH GAME armed until then
 
@@ -546,11 +548,12 @@ class Game(object):
 
         if self.state == "question":
             left = self.time_left()
-            colour = RED if left <= 5 else GOLD
-            draw_text(self.screen, "TIME UP" if left == 0 else "%0.0f" % left,
-                      (0, top * 0.62, self.w, top * 0.16), colour, 80, 24, True)
-            draw_text(self.screen, "click anywhere or press SPACE to reveal the answer",
-                      (0, top - 50, self.w, 40), WHITE, 24, 12)
+            colour = WHITE if self.paused else (RED if left <= 5 else GOLD)
+            text = "PAUSED" if self.paused else ("TIME UP" if left == 0 else "%0.0f" % left)
+            draw_text(self.screen, text, (0, top * 0.62, self.w, top * 0.16), colour, 80, 24, True)
+            hint = ("paused - press P to resume" if self.paused else
+                    "click anywhere or press SPACE to reveal the answer  -  P to pause")
+            draw_text(self.screen, hint, (0, top - 50, self.w, 40), WHITE, 24, 12)
             if left == 0 and not self.buzzed:
                 self.buzz()
         else:
@@ -565,7 +568,19 @@ class Game(object):
 
     # -- actions -----------------------------------------------------------
     def time_left(self):
-        return max(0, self.time_limit - (time.perf_counter() - self.started))
+        now = self.pause_started if self.paused else time.perf_counter()
+        return max(0, self.time_limit - (now - self.started))
+
+    def toggle_pause(self):
+        """Pause or resume the countdown while a question is up."""
+        if self.state != "question":
+            return
+        if self.paused:
+            self.started += time.perf_counter() - self.pause_started
+            self.paused = False
+        else:
+            self.pause_started = time.perf_counter()
+            self.paused = True
 
     def update_ticktock(self):
         """Tick while a question is up and the clock is running, and at no
@@ -573,7 +588,7 @@ class Game(object):
         (reveal, ESC, time up, ending the round) stops the sound."""
         if self.ticktock is None:
             return
-        wanted = self.state == "question" and self.time_left() > 0
+        wanted = self.state == "question" and not self.paused and self.time_left() > 0
         if wanted and not self.ticking:
             self.ticktock.play(loops=-1)
         elif not wanted and self.ticking:
@@ -597,6 +612,7 @@ class Game(object):
         self.state = "question"
         self.started = time.perf_counter()
         self.buzzed = False
+        self.paused = False
 
     def score(self, correct):
         row, _ = self.current
@@ -638,8 +654,10 @@ class Game(object):
             elif event.key == pygame.K_ESCAPE:
                 self.state, self.current, self.team_index = "board", None, -1
             elif event.key == pygame.K_r and self.state == "question":
-                self.started, self.buzzed = time.perf_counter(), False
-            elif event.key == pygame.K_SPACE and self.state == "question":
+                self.started, self.buzzed, self.paused = time.perf_counter(), False, False
+            elif event.key == pygame.K_p and self.state == "question":
+                self.toggle_pause()
+            elif event.key == pygame.K_SPACE and self.state == "question" and not self.paused:
                 self.state = "answer"
             elif event.key == pygame.K_y and self.state == "answer":
                 self.score(True)
@@ -671,7 +689,7 @@ class Game(object):
                 cell = self.cell_at(event.pos)
                 if cell:
                     self.open_cell(cell)
-            elif self.state == "question":
+            elif self.state == "question" and not self.paused:
                 self.state = "answer"
             elif self.state == "answer":
                 right, wrong = self.button_rects()
@@ -776,7 +794,8 @@ def main(argv=None):
     parser.add_argument("--time", type=int, default=30, metavar="SECONDS",
                         help="seconds allowed per question (default 30)")
     parser.add_argument("--buzzer", default="buzzer2.wav", metavar="WAV",
-                        help="sound played at time up, if the file exists")
+                        help="sound played at time up, if the file exists "
+                             '(default buzzer2.wav; --buzzer "" for silent mode, no buzzer)')
     parser.add_argument("--ticktock", default="ticktock.wav", metavar="WAV",
                         help="sound looped while the timer runs, if the file exists "
                              '(default ticktock.wav; --ticktock "" for silence)')

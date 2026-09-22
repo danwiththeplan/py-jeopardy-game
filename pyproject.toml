@@ -4,10 +4,14 @@ version = "0.1.0"
 description = ""
 authors = ["danwiththeplan <dan837446@gmail.com>"]
 readme = "README.md"
+packages = [{ include = "jeopardy.py" }]
 
 [tool.poetry.dependencies]
 python = "^3.12"
 pygame = "^2.6.1"
+
+[tool.poetry.scripts]
+jeopardy = "jeopardy:main"
 
 
 [build-system]

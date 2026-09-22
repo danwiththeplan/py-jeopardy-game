@@ -8,7 +8,8 @@ Questions are stored in a plain CSV file that you can edit in any spreadsheet pr
 
 - Boards of any size from 3×3 up to 8×8, read automatically from the CSV
 - Up to 8 teams, with scores shown along the bottom of the screen
-- A countdown timer for each question, with an optional ticking clock and time-up buzzer
+- A countdown timer for each question, with an optional ticking clock and time-up buzzer, and a pause/resume control
+- A silent mode (`--buzzer ""`) for classrooms where the buzzer sound isn't wanted
 - Multiple rounds from separate CSV files, with scores carried over between rounds
 - Steals: another team can take over a question while it is on screen
 - A winner screen with a full ranking (ties are handled)
@@ -43,13 +44,15 @@ Poetry creates a virtual environment for the project and installs pygame into it
 Put `poetry run` in front of each command so the game uses the project's environment:
 
 ```shell
-poetry run python jeopardy.py myset.csv
+poetry run jeopardy myset.csv
 ```
+
+(`poetry run python jeopardy.py myset.csv` works the same way, if you'd rather call the script directly.)
 
 You'll be asked how many teams are playing and what they're called, and then the board opens. To skip the prompts, give the team names on the command line:
 
 ```shell
-poetry run python jeopardy.py myset.csv --teams "Kea,Weta,Tuatara"
+poetry run jeopardy myset.csv --teams "Kea,Weta,Tuatara"
 ```
 
 ### Command-line options
@@ -58,26 +61,27 @@ poetry run python jeopardy.py myset.csv --teams "Kea,Weta,Tuatara"
 | --- | --- |
 | `--teams "A,B,C"` | Team names, separated by commas (1 to 8 teams). If omitted, you are prompted. |
 | `--time SECONDS` | Seconds allowed per question (default 30, minimum 5). |
-| `--buzzer FILE.wav` | Sound played when time runs out (default `buzzer2.wav`). |
+| `--buzzer FILE.wav` | Sound played when time runs out (default `buzzer2.wav`). Use `--buzzer ""` for silent mode (no buzzer). |
 | `--ticktock FILE.wav` | Sound looped while the timer runs (default `ticktock.wav`). Use `--ticktock ""` for silence. |
 | `--check` | Check the CSV file(s) and print a summary without starting the game. |
 
 Examples:
 
 ```shell
-poetry run python jeopardy.py myset.csv --check
-poetry run python jeopardy.py myset.csv --teams "Kea,Weta" --time 45
-poetry run python jeopardy.py myset.csv --ticktock ""
+poetry run jeopardy myset.csv --check
+poetry run jeopardy myset.csv --teams "Kea,Weta" --time 45
+poetry run jeopardy myset.csv --ticktock ""
+poetry run jeopardy myset.csv --buzzer ""
 ```
 
-Run `poetry run python jeopardy.py --help` to see all options.
+Run `poetry run jeopardy --help` to see all options.
 
 ### Playing several rounds
 
 Give a comma-separated list of CSV files (no spaces, or put quotes around the whole list). The rounds are played in the order listed, each board can be a different size, and scores carry over from round to round.
 
 ```shell
-poetry run python jeopardy.py round1.csv,round2.csv,final.csv
+poetry run jeopardy round1.csv,round2.csv,final.csv
 ```
 
 When every square in a round has been played, a "Round complete" screen appears. Click or press ENTER to start the next round.
@@ -126,6 +130,7 @@ A few tips:
 | Reveal the answer | Click the question, or press SPACE |
 | Score the answer | Click CORRECT or WRONG, or press Y or N |
 | Steal a question | Click a different team while the question is on screen (the timer restarts) |
+| Pause / resume the timer | P |
 | Restart the timer | R |
 | Back to the board | ESC |
 | End the round early | Click END ROUND twice, or press PAGE DOWN |
@@ -137,7 +142,7 @@ A wrong answer subtracts the question's points from the answering team. The winn
 
 ## Sounds
 
-`ticktock.wav` loops while a question's timer is running and stops when the answer is revealed, time runs out, or you leave the question. `buzzer2.wav` plays when time is up. Both are included in the repository. The game looks for sound files in the current folder first and then in the folder containing `jeopardy.py`, and it runs silently if a file is missing.
+`ticktock.wav` loops while a question's timer is running and stops when the answer is revealed, time runs out, you pause the timer, or you leave the question. `buzzer2.wav` plays when time is up. Both are included in the repository. The game looks for sound files in the current folder first and then in the folder containing `jeopardy.py`, and it runs silently if a file is missing — so `--buzzer ""` or `--ticktock ""` also gives you silence on demand.
 
 ## Credits
 
