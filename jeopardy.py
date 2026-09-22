@@ -6,6 +6,12 @@ Classroom Jeopardy - reads any question set from 3x3 up to 8x8.
     python3 jeopardy4.py myset.csv --check            # validate the file only
     python3 jeopardy4.py myset.csv --teams "Kea,Weta" --time 45
     python3 jeopardy4.py round1.csv,round2.csv,final.csv   # three rounds, in order
+    python3 jeopardy4.py myset.csv --ticktock ""      # no ticking clock
+
+While a question's timer is running, ticktock.wav (or the --ticktock file)
+loops in the background, if it exists. It stops when the answer is revealed,
+when time runs out, or when you leave the question. Sound files are looked
+for in the current folder first, then in the folder this script is in.
 
 Several rounds: give a comma-separated list of CSV files (no spaces, or quote
 the whole list). Each file is a complete board in the format below, and the
@@ -289,7 +295,8 @@ def draw_text(surface, text, rect, colour, max_size=52, min_size=14, bold=False)
 
 # ------------------------------------------------------------------- game --
 class Game(object):
-    def __init__(self, boards, teams, time_limit=30, buzzer="buzzer2.wav"):
+    def __init__(self, boards, teams, time_limit=30, buzzer="buzzer2.wav",
+                 ticktock="ticktock.wav"):
         if isinstance(boards, Board):
             boards = [boards]
         self.boards = list(boards)
@@ -297,7 +304,7 @@ class Game(object):
         self.teams = teams
         self.scores = [0] * len(teams)
         self.time_limit = time_limit
-        self.buzzer = buzzer
+        self.buzzer = find_sound(buzzer)
         self.used = set()
         self.team_index = -1
         self.state = "board"            # board | question | answer | round_over | game_over
@@ -312,6 +319,14 @@ class Game(object):
             pygame.mixer.init()
         except pygame.error:
             pass
+        self.ticktock = None                     # looped while the timer runs
+        path = find_sound(ticktock)
+        if path and pygame.mixer.get_init():
+            try:
+                self.ticktock = pygame.mixer.Sound(path)
+            except pygame.error:
+                pass
+        self.ticking = False
         self.screen = pygame.display.set_mode((WIN_W, WIN_H), pygame.RESIZABLE)
         self.set_caption()
         self.w, self.h = self.screen.get_size()
@@ -521,7 +536,7 @@ class Game(object):
                   (60, top * 0.13, self.w - 120, top * 0.40), WHITE, 54, 16, True)
 
         if self.state == "question":
-            left = max(0, self.time_limit - (time.perf_counter() - self.started))
+            left = self.time_left()
             colour = RED if left <= 5 else GOLD
             draw_text(self.screen, "TIME UP" if left == 0 else "%0.0f" % left,
                       (0, top * 0.62, self.w, top * 0.16), colour, 80, 24, True)
@@ -540,6 +555,22 @@ class Game(object):
         self.draw_score_bar()
 
     # -- actions -----------------------------------------------------------
+    def time_left(self):
+        return max(0, self.time_limit - (time.perf_counter() - self.started))
+
+    def update_ticktock(self):
+        """Tick while a question is up and the clock is running, and at no
+        other time. Called every frame, so every way of leaving a question
+        (reveal, ESC, time up, ending the round) stops the sound."""
+        if self.ticktock is None:
+            return
+        wanted = self.state == "question" and self.time_left() > 0
+        if wanted and not self.ticking:
+            self.ticktock.play(loops=-1)
+        elif not wanted and self.ticking:
+            self.ticktock.stop()
+        self.ticking = wanted
+
     def buzz(self):
         self.buzzed = True
         if pygame.mixer.get_init() and self.buzzer and os.path.exists(self.buzzer):
@@ -656,6 +687,7 @@ class Game(object):
                 self.draw_game_over()
             else:
                 self.draw_question()
+            self.update_ticktock()
             pygame.display.update()
             self.clock.tick(30)
         pygame.quit()
@@ -667,6 +699,18 @@ class Game(object):
 
 
 # ------------------------------------------------------------------- main --
+def find_sound(name):
+    """Return a path for the sound file `name`, looking in the current folder
+    and then next to this script. None if it is not found or not wanted."""
+    if not name:
+        return None
+    here = os.path.dirname(os.path.abspath(__file__))
+    for path in (name, os.path.join(here, name)):
+        if os.path.isfile(path):
+            return path
+    return None
+
+
 def ask_teams():
     while True:
         try:
@@ -724,6 +768,9 @@ def main(argv=None):
                         help="seconds allowed per question (default 30)")
     parser.add_argument("--buzzer", default="buzzer2.wav", metavar="WAV",
                         help="sound played at time up, if the file exists")
+    parser.add_argument("--ticktock", default="ticktock.wav", metavar="WAV",
+                        help="sound looped while the timer runs, if the file exists "
+                             '(default ticktock.wav; --ticktock "" for silence)')
     parser.add_argument("--check", action="store_true",
                         help="check the CSV and print a summary without starting the game")
     args = parser.parse_args(argv)
@@ -747,7 +794,8 @@ def main(argv=None):
 
     if teams is None:
         teams = ask_teams()
-    Game(boards, teams, time_limit=max(5, args.time), buzzer=args.buzzer).run()
+    Game(boards, teams, time_limit=max(5, args.time), buzzer=args.buzzer,
+         ticktock=args.ticktock).run()
     return 0
 
 
