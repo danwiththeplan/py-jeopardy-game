@@ -34,6 +34,10 @@ Controls:
     ESC back to the board   R restart timer   F fullscreen   Q quit
     END ROUND button (bottom right), click twice to confirm, or PAGE DOWN
                                           -> end this round early, go to the next
+    FINISH GAME button (final round, or a single-round game), click twice,
+    or PAGE DOWN                          -> go to the winner screen
+The winner screen also appears by itself once the last square of the final
+round has been played.
 """
 
 import argparse
@@ -59,7 +63,7 @@ GOLD = (255, 204, 0)
 WHITE = (255, 255, 255)
 GREY = (120, 120, 130)
 BLACK = (0, 0, 0)
-RED = (200, 30, 30)
+RED = (255, 0, 0)
 GREEN = (20, 150, 60)
 
 
@@ -296,12 +300,12 @@ class Game(object):
         self.buzzer = buzzer
         self.used = set()
         self.team_index = -1
-        self.state = "board"            # board | question | answer | round_over
+        self.state = "board"            # board | question | answer | round_over | game_over
         self.current = None
         self.started = 0.0
         self.buzzed = False
         self.fullscreen = False
-        self.confirm_until = 0.0        # END ROUND armed until this time
+        self.confirm_until = 0.0        # END ROUND / FINISH GAME armed until then
 
         pygame.init()
         try:
@@ -340,9 +344,18 @@ class Game(object):
         return len(self.used) >= self.board.n_rows * self.board.n_cols
 
     def end_round(self):
+        """Leave the current round: on to the next one, or to the winner screen
+        if this was the final round."""
         self.confirm_until = 0.0
-        if self.has_next_round:
-            self.state, self.current, self.team_index = "round_over", None, -1
+        self.state = "round_over" if self.has_next_round else "game_over"
+        self.current, self.team_index = None, -1
+
+    def winners(self):
+        best = max(self.scores)
+        return [i for i, score in enumerate(self.scores) if score == best]
+
+    def ranking(self):
+        return sorted(range(len(self.teams)), key=lambda i: -self.scores[i])
 
     def is_page_down(self, event):
         return (event.key in PAGE_DOWN_KEYS
@@ -381,9 +394,9 @@ class Game(object):
         return (band, col)
 
     def end_round_rect(self):
-        """The END ROUND button at the right of the score bar, or None when
-        there is no round to move on to."""
-        if not self.has_next_round or self.state == "round_over":
+        """The END ROUND / FINISH GAME button at the right of the score bar,
+        or None on screens that have no score bar."""
+        if self.state in ("round_over", "game_over"):
             return None
         width = int(min(190, max(110, self.w * 0.13)))
         return pygame.Rect(self.w - width + 4, self.board_h + 4, width - 8, self.score_h - 8)
@@ -424,7 +437,8 @@ class Game(object):
             armed = time.perf_counter() < self.confirm_until
             pygame.draw.rect(self.screen, RED if armed else DARK, button)
             pygame.draw.rect(self.screen, RED, button, 3)
-            draw_text(self.screen, "CLICK AGAIN TO END ROUND" if armed else "END ROUND",
+            action = "END ROUND" if self.has_next_round else "FINISH GAME"
+            draw_text(self.screen, "CLICK AGAIN TO " + action if armed else action,
                       (button.x, button.y, button.w, button.h), WHITE, 26, 10, True)
 
     def draw_board(self):
@@ -457,6 +471,42 @@ class Game(object):
         draw_text(self.screen, "click or press ENTER to start the next round",
                   (0, top - 50, self.w, 40), WHITE, 24, 12)
         self.draw_score_bar()
+
+    def draw_game_over(self):
+        self.screen.fill(BLACK)
+        winners = self.winners()
+        names = " & ".join(self.teams[i] for i in winners)
+        title_h = self.h * 0.30
+        draw_text(self.screen, "GAME OVER", (0, self.h * 0.03, self.w, title_h * 0.30),
+                  WHITE, 44, 16, True)
+        draw_text(self.screen, "IT'S A TIE!" if len(winners) > 1 else "WINNER",
+                  (0, title_h * 0.33, self.w, title_h * 0.22), GOLD, 40, 14, True)
+        draw_text(self.screen, names, (40, title_h * 0.55, self.w - 80, title_h * 0.45),
+                  GOLD, 90, 20, True)
+
+        order = self.ranking()
+        top = title_h + 20
+        room = self.h - top - 50
+        row_h = min(80, room / float(len(order)))
+        table_w = min(self.w - 80, 800)
+        left = (self.w - table_w) / 2.0
+        place, previous = 0, None
+        for n, i in enumerate(order):
+            if self.scores[i] != previous:        # equal scores share a place
+                place, previous = n + 1, self.scores[i]
+            won = i in winners
+            box = pygame.Rect(left, top + n * row_h + 3, table_w, row_h - 6)
+            pygame.draw.rect(self.screen, GOLD if won else DARK, box)
+            pygame.draw.rect(self.screen, WHITE if won else GREY, box, 3)
+            ink = BLACK if won else WHITE
+            draw_text(self.screen, "%d" % place, (box.x, box.y, box.w * 0.12, box.h),
+                      ink, 44, 12, True)
+            draw_text(self.screen, self.teams[i],
+                      (box.x + box.w * 0.12, box.y, box.w * 0.60, box.h), ink, 44, 12, True)
+            draw_text(self.screen, str(self.scores[i]),
+                      (box.x + box.w * 0.72, box.y, box.w * 0.28, box.h),
+                      BLACK if won else GOLD, 44, 12, True)
+        draw_text(self.screen, "press Q to quit", (0, self.h - 42, self.w, 34), GREY, 22, 12)
 
     def draw_question(self):
         self.screen.fill(BLUE)
@@ -541,9 +591,11 @@ class Game(object):
             elif self.state == "round_over" and event.key in (
                     pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
                 self.next_round()
-            elif self.is_page_down(event) and self.state != "round_over":
+            elif self.state in ("round_over", "game_over"):
+                pass                              # only the keys above work here
+            elif self.is_page_down(event):
                 self.end_round()
-            elif event.key == pygame.K_ESCAPE and self.state != "round_over":
+            elif event.key == pygame.K_ESCAPE:
                 self.state, self.current, self.team_index = "board", None, -1
             elif event.key == pygame.K_r and self.state == "question":
                 self.started, self.buzzed = time.perf_counter(), False
@@ -559,6 +611,8 @@ class Game(object):
             if self.state == "round_over":
                 if event.pos[1] < self.board_h:
                     self.next_round()
+                return True
+            if self.state == "game_over":
                 return True
             button = self.end_round_rect()
             if button and button.collidepoint(event.pos):
@@ -598,14 +652,18 @@ class Game(object):
                 self.draw_board()
             elif self.state == "round_over":
                 self.draw_round_over()
+            elif self.state == "game_over":
+                self.draw_game_over()
             else:
                 self.draw_question()
             pygame.display.update()
             self.clock.tick(30)
         pygame.quit()
         print("\nFinal scores")
-        for name, score in sorted(zip(self.teams, self.scores), key=lambda t: -t[1]):
-            print("  %-20s %5d" % (name, score))
+        winners = self.winners()
+        for i in self.ranking():
+            print("  %-20s %5d%s" % (self.teams[i], self.scores[i],
+                                     "   <- winner" if i in winners else ""))
 
 
 # ------------------------------------------------------------------- main --
