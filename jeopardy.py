@@ -39,6 +39,8 @@ taken from the file: the number of columns is the highest Col plus one,
 the number of rows is the highest Row.
 
 Controls:
+        qset_human_origins.csv
+        qset_plant_animal_responses.csv
     Click a team at the bottom            -> that team is answering
     Click a value on the board            -> question appears, timer starts
     Click the question / SPACE            -> reveal the answer
