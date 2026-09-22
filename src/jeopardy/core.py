@@ -1,25 +1,17 @@
-#!/usr/bin/env python3
 """
 Classroom Jeopardy - reads any question set from 3x3 up to 8x8.
 
-Dependencies are managed with Poetry (see pyproject.toml). Install once with
-`poetry install`, then run the game with `poetry run` in front of the usual
-command:
-
-    poetry run jeopardy myset.csv
-    poetry run jeopardy myset.csv --check            # validate the file only
-    poetry run jeopardy myset.csv --teams "Kea,Weta" --time 45
-    poetry run jeopardy round1.csv,round2.csv,final.csv   # three rounds, in order
-    poetry run jeopardy myset.csv --ticktock ""      # no ticking clock
-    poetry run jeopardy myset.csv --buzzer ""        # no buzzer
-
-(`poetry run python jeopardy.py myset.csv` works the same way, if you'd
-rather call the script directly.)
+    jeopardy myset.csv
+    jeopardy myset.csv --check            # validate the file only
+    jeopardy myset.csv --teams "Kea,Weta" --time 45
+    jeopardy round1.csv,round2.csv,final.csv   # three rounds, in order
+    jeopardy myset.csv --ticktock ""      # no ticking clock
+    jeopardy myset.csv --buzzer ""        # no buzzer
 
 While a question's timer is running, ticktock.wav (or the --ticktock file)
 loops in the background, if it exists. It stops when the answer is revealed,
 when time runs out, or when you leave the question. Sound files are looked
-for in the current folder first, then in the folder this script is in.
+for in the current folder first, then in this package's resources folder.
 
 Several rounds: give a comma-separated list of CSV files (no spaces, or quote
 the whole list). Each file is a complete board in the format below, and the
@@ -62,6 +54,8 @@ import sys
 import time
 
 import pygame
+
+from jeopardy.utils import draw_text, find_sound, whole_number
 
 MIN_SIDE, MAX_SIDE = 3, 8
 REQUIRED_COLUMNS = ("Row", "Col", "Question", "Answer", "Categories")
@@ -143,17 +137,6 @@ def _column_map(path, fieldnames):
     return {c: found[c.lower()] for c in REQUIRED_COLUMNS}
 
 
-def _whole_number(value):
-    text = str(value if value is not None else "").strip()
-    try:
-        number = float(text)
-    except ValueError:
-        return None
-    if number != int(number):
-        return None
-    return int(number)
-
-
 def load_questions(path):
     """Read and validate a question set. Raises QuestionFileError with advice."""
     fieldnames, raw = _read_rows(path)
@@ -176,8 +159,8 @@ def load_questions(path):
         if not question and not answer:
             continue                          # a category-only line
 
-        r = _whole_number(get(row, "Row"))
-        c = _whole_number(get(row, "Col"))
+        r = whole_number(get(row, "Row"))
+        c = whole_number(get(row, "Col"))
         if r is None or r < 1:
             problems.append('line %d: Row must be a whole number of 1 or more (found "%s")'
                             % (line, get(row, "Row")))
@@ -242,64 +225,6 @@ def load_questions(path):
                  % (n_rows, n_cols, n_rows * n_cols)))
 
     return Board(categories, questions, n_rows, n_cols, path)
-
-
-# ------------------------------------------------------------------- text --
-_FONTS = {}
-
-
-def get_font(size, bold=False):
-    if (size, bold) not in _FONTS:
-        _FONTS[(size, bold)] = pygame.font.SysFont("Arial", size, bold=bold)
-    return _FONTS[(size, bold)]
-
-
-def wrap(font, text, max_w, hard=False):
-    """Split `text` into lines that fit `max_w`. With hard=True, over-long
-    words are broken mid-word rather than allowed to overflow."""
-    lines, current = [], ""
-    for word in str(text).split():
-        while hard and font.size(word)[0] > max_w and len(word) > 1:
-            cut = len(word)
-            while cut > 1 and font.size(word[:cut])[0] > max_w:
-                cut -= 1
-            if current:
-                lines.append(current)
-                current = ""
-            lines.append(word[:cut])
-            word = word[cut:]
-        trial = (current + " " + word).strip()
-        if current and font.size(trial)[0] > max_w:
-            lines.append(current)
-            current = word
-        else:
-            current = trial
-    if current:
-        lines.append(current)
-    return lines
-
-
-def draw_text(surface, text, rect, colour, max_size=52, min_size=14, bold=False):
-    """Fit `text` inside `rect`, shrinking the font until it fits."""
-    x, y, w, h = rect
-    inner = w - 16
-    font, lines, line_h = None, [], 0
-    for size in range(int(max_size), int(min_size) - 1, -2):
-        font = get_font(size, bold)
-        lines = wrap(font, text, inner)
-        line_h = font.get_linesize()
-        widest = max([font.size(line)[0] for line in lines] or [0])
-        if widest <= inner and len(lines) * line_h <= h:
-            break
-    else:
-        # nothing fits even at the smallest size - break words to stay inside
-        font = get_font(int(min_size), bold)
-        lines = wrap(font, text, inner, hard=True)
-        line_h = font.get_linesize()
-    top = y + (h - len(lines) * line_h) / 2
-    for i, line in enumerate(lines):
-        image = font.render(line, True, colour)
-        surface.blit(image, (x + (w - image.get_width()) / 2, top + i * line_h))
 
 
 # ------------------------------------------------------------------- game --
@@ -726,18 +651,6 @@ class Game(object):
 
 
 # ------------------------------------------------------------------- main --
-def find_sound(name):
-    """Return a path for the sound file `name`, looking in the current folder
-    and then next to this script. None if it is not found or not wanted."""
-    if not name:
-        return None
-    here = os.path.dirname(os.path.abspath(__file__))
-    for path in (name, os.path.join(here, name)):
-        if os.path.isfile(path):
-            return path
-    return None
-
-
 def ask_teams():
     while True:
         try:

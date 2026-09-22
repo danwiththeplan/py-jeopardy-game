@@ -39,6 +39,14 @@ poetry install
 
 Poetry creates a virtual environment for the project and installs pygame into it. You only need to do this once.
 
+## Development
+
+The `jeopardy` package lives under `src/`. Run the test suite with:
+
+```shell
+poetry run pytest
+```
+
 ## Running the game
 
 Put `poetry run` in front of each command so the game uses the project's environment:
@@ -47,7 +55,13 @@ Put `poetry run` in front of each command so the game uses the project's environ
 poetry run jeopardy myset.csv
 ```
 
-(`poetry run python jeopardy.py myset.csv` works the same way, if you'd rather call the script directly.)
+(`poetry run python -m jeopardy myset.csv` works the same way, if you'd rather invoke the package directly.)
+
+A ready-made example set is included at `data/example.csv`:
+
+```shell
+poetry run jeopardy data/example.csv
+```
 
 You'll be asked how many teams are playing and what they're called, and then the board opens. To skip the prompts, give the team names on the command line:
 
@@ -142,7 +156,11 @@ A wrong answer subtracts the question's points from the answering team. The winn
 
 ## Sounds
 
-`ticktock.wav` loops while a question's timer is running and stops when the answer is revealed, time runs out, you pause the timer, or you leave the question. `buzzer2.wav` plays when time is up. Both are included in the repository. The game looks for sound files in the current folder first and then in the folder containing `jeopardy.py`, and it runs silently if a file is missing — so `--buzzer ""` or `--ticktock ""` also gives you silence on demand.
+`ticktock.wav` loops while a question's timer is running and stops when the answer is revealed, time runs out, you pause the timer, or you leave the question. `buzzer2.wav` plays when time is up. Both are included in the package's `src/jeopardy/resources/` folder. The game looks for sound files in the current folder first and then in that resources folder, and it runs silently if a file is missing — so `--buzzer ""` or `--ticktock ""` also gives you silence on demand. Use `--buzzer` or `--ticktock` with a path to your own `.wav` file to override either sound.
+
+## License
+
+This project is licensed under the [GNU General Public License v3.0](LICENSE) or later.
 
 ## Credits
 
