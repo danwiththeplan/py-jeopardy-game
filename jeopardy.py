@@ -5,6 +5,13 @@ Classroom Jeopardy - reads any question set from 3x3 up to 8x8.
     python3 jeopardy4.py myset.csv
     python3 jeopardy4.py myset.csv --check            # validate the file only
     python3 jeopardy4.py myset.csv --teams "Kea,Weta" --time 45
+    python3 jeopardy4.py round1.csv,round2.csv,final.csv   # three rounds, in order
+
+Several rounds: give a comma-separated list of CSV files (no spaces, or quote
+the whole list). Each file is a complete board in the format below, and the
+boards can be different sizes. Scores carry over from round to round. When
+every square of a round has been played, a "round complete" screen appears;
+click or press ENTER to start the next round.
 
 The CSV needs these five columns (extra columns are ignored):
 
@@ -25,6 +32,8 @@ Controls:
     CORRECT / WRONG buttons, or Y / N     -> score it and go back to the board
     Click another team while a question is up -> steals it for that team
     ESC back to the board   R restart timer   F fullscreen   Q quit
+    END ROUND button (bottom right), click twice to confirm, or PAGE DOWN
+                                          -> end this round early, go to the next
 """
 
 import argparse
@@ -40,6 +49,9 @@ REQUIRED_COLUMNS = ("Row", "Col", "Question", "Answer", "Categories")
 POINTS_STEP = 100
 MAX_TEAMS = 8
 WIN_W, WIN_H = 1200, 820
+CONFIRM_SECONDS = 3             # how long the END ROUND button waits for a second click
+PAGE_DOWN_KEYS = (pygame.K_PAGEDOWN, pygame.K_KP3)       # KP3 = numpad PgDn, NumLock off
+PAGE_DOWN_SCANCODES = (78, 91)  # SDL scancodes for PgDn and numpad 3, whatever the layout
 
 BLUE = (6, 12, 180)
 DARK = (10, 10, 40)
@@ -273,19 +285,23 @@ def draw_text(surface, text, rect, colour, max_size=52, min_size=14, bold=False)
 
 # ------------------------------------------------------------------- game --
 class Game(object):
-    def __init__(self, board, teams, time_limit=30, buzzer="buzzer2.wav"):
-        self.board = board
+    def __init__(self, boards, teams, time_limit=30, buzzer="buzzer2.wav"):
+        if isinstance(boards, Board):
+            boards = [boards]
+        self.boards = list(boards)
+        self.round_index = 0
         self.teams = teams
         self.scores = [0] * len(teams)
         self.time_limit = time_limit
         self.buzzer = buzzer
         self.used = set()
         self.team_index = -1
-        self.state = "board"            # board | question | answer
+        self.state = "board"            # board | question | answer | round_over
         self.current = None
         self.started = 0.0
         self.buzzed = False
         self.fullscreen = False
+        self.confirm_until = 0.0        # END ROUND armed until this time
 
         pygame.init()
         try:
@@ -293,9 +309,52 @@ class Game(object):
         except pygame.error:
             pass
         self.screen = pygame.display.set_mode((WIN_W, WIN_H), pygame.RESIZABLE)
-        pygame.display.set_caption("Jeopardy - %s" % os.path.basename(board.path))
+        self.set_caption()
         self.w, self.h = self.screen.get_size()
         self.clock = pygame.time.Clock()
+
+    # -- rounds ------------------------------------------------------------
+    @property
+    def board(self):
+        return self.boards[self.round_index]
+
+    @property
+    def multi_round(self):
+        return len(self.boards) > 1
+
+    @property
+    def has_next_round(self):
+        return self.round_index + 1 < len(self.boards)
+
+    def round_label(self, index=None):
+        index = self.round_index if index is None else index
+        return "Round %d of %d" % (index + 1, len(self.boards))
+
+    def set_caption(self):
+        name = os.path.basename(self.board.path)
+        if self.multi_round:
+            name = "%s - %s" % (self.round_label(), name)
+        pygame.display.set_caption("Jeopardy - %s" % name)
+
+    def round_finished(self):
+        return len(self.used) >= self.board.n_rows * self.board.n_cols
+
+    def end_round(self):
+        self.confirm_until = 0.0
+        if self.has_next_round:
+            self.state, self.current, self.team_index = "round_over", None, -1
+
+    def is_page_down(self, event):
+        return (event.key in PAGE_DOWN_KEYS
+                or getattr(event, "scancode", None) in PAGE_DOWN_SCANCODES)
+
+    def next_round(self):
+        if not self.has_next_round:
+            return
+        self.round_index += 1
+        self.used = set()
+        self.state, self.current, self.team_index = "board", None, -1
+        self.set_caption()
 
     # -- geometry ----------------------------------------------------------
     @property
@@ -321,10 +380,23 @@ class Game(object):
             return None
         return (band, col)
 
-    def team_at(self, pos):
-        if pos[1] < self.board_h:
+    def end_round_rect(self):
+        """The END ROUND button at the right of the score bar, or None when
+        there is no round to move on to."""
+        if not self.has_next_round or self.state == "round_over":
             return None
-        return min(int(pos[0] // (self.w / float(len(self.teams)))), len(self.teams) - 1)
+        width = int(min(190, max(110, self.w * 0.13)))
+        return pygame.Rect(self.w - width + 4, self.board_h + 4, width - 8, self.score_h - 8)
+
+    @property
+    def teams_w(self):
+        button = self.end_round_rect()
+        return self.w - (button.w + 8 if button else 0)
+
+    def team_at(self, pos):
+        if pos[1] < self.board_h or pos[0] >= self.teams_w:
+            return None
+        return min(int(pos[0] // (self.teams_w / float(len(self.teams)))), len(self.teams) - 1)
 
     def button_rects(self):
         w, h = self.w / 4.0, 80
@@ -338,7 +410,7 @@ class Game(object):
     # -- drawing -----------------------------------------------------------
     def draw_score_bar(self):
         pygame.draw.rect(self.screen, DARK, (0, self.board_h, self.w, self.score_h))
-        width = self.w / float(len(self.teams))
+        width = self.teams_w / float(len(self.teams))
         for i, name in enumerate(self.teams):
             box = pygame.Rect(i * width + 4, self.board_h + 4, width - 8, self.score_h - 8)
             pygame.draw.rect(self.screen, BLUE if i == self.team_index else DARK, box)
@@ -347,6 +419,13 @@ class Game(object):
                       WHITE, 30, 11, True)
             draw_text(self.screen, str(self.scores[i]),
                       (box.x, box.y + box.h * 0.42, box.w, box.h * 0.52), GOLD, 46, 14, True)
+        button = self.end_round_rect()
+        if button:
+            armed = time.perf_counter() < self.confirm_until
+            pygame.draw.rect(self.screen, RED if armed else DARK, button)
+            pygame.draw.rect(self.screen, RED, button, 3)
+            draw_text(self.screen, "CLICK AGAIN TO END ROUND" if armed else "END ROUND",
+                      (button.x, button.y, button.w, button.h), WHITE, 26, 10, True)
 
     def draw_board(self):
         self.screen.fill(BLACK)
@@ -363,6 +442,20 @@ class Game(object):
                 if not used:
                     draw_text(self.screen, str(self.points(row)),
                               (box.x, box.y, box.w, box.h), GOLD, 64, 14, True)
+        self.draw_score_bar()
+
+    def draw_round_over(self):
+        self.screen.fill(BLUE)
+        top = self.board_h
+        draw_text(self.screen, "Round %d complete" % (self.round_index + 1),
+                  (40, top * 0.12, self.w - 80, top * 0.22), GOLD, 80, 24, True)
+        leader = max(range(len(self.teams)), key=lambda i: self.scores[i])
+        draw_text(self.screen, "Leading: %s (%d)" % (self.teams[leader], self.scores[leader]),
+                  (40, top * 0.38, self.w - 80, top * 0.14), WHITE, 46, 16, True)
+        draw_text(self.screen, "Next up: %s" % self.round_label(self.round_index + 1),
+                  (40, top * 0.56, self.w - 80, top * 0.14), GOLD, 46, 16, True)
+        draw_text(self.screen, "click or press ENTER to start the next round",
+                  (0, top - 50, self.w, 40), WHITE, 24, 12)
         self.draw_score_bar()
 
     def draw_question(self):
@@ -445,7 +538,12 @@ class Game(object):
                 return False
             if event.key == pygame.K_f:
                 self.toggle_fullscreen()
-            elif event.key == pygame.K_ESCAPE:
+            elif self.state == "round_over" and event.key in (
+                    pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+                self.next_round()
+            elif self.is_page_down(event) and self.state != "round_over":
+                self.end_round()
+            elif event.key == pygame.K_ESCAPE and self.state != "round_over":
                 self.state, self.current, self.team_index = "board", None, -1
             elif event.key == pygame.K_r and self.state == "question":
                 self.started, self.buzzed = time.perf_counter(), False
@@ -458,6 +556,17 @@ class Game(object):
             return True
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.state == "round_over":
+                if event.pos[1] < self.board_h:
+                    self.next_round()
+                return True
+            button = self.end_round_rect()
+            if button and button.collidepoint(event.pos):
+                if time.perf_counter() < self.confirm_until:
+                    self.end_round()
+                else:
+                    self.confirm_until = time.perf_counter() + CONFIRM_SECONDS
+                return True
             team = self.team_at(event.pos)
             if team is not None:
                 self.team_index = team
@@ -483,8 +592,12 @@ class Game(object):
         while running:
             for event in pygame.event.get():
                 running = self.handle(event) and running
+            if self.state == "board" and self.round_finished():
+                self.end_round()
             if self.state == "board":
                 self.draw_board()
+            elif self.state == "round_over":
+                self.draw_round_over()
             else:
                 self.draw_question()
             pygame.display.update()
@@ -520,11 +633,34 @@ def parse_teams(text):
     return names
 
 
+def parse_csv_list(text):
+    paths = [p.strip() for p in text.split(",") if p.strip()]
+    if not paths:
+        raise QuestionFileError("Give at least one CSV file.")
+    return paths
+
+
+def load_rounds(paths):
+    """Load every round, collecting problems from all files before giving up."""
+    boards, errors = [], []
+    for number, path in enumerate(paths, 1):
+        try:
+            boards.append(load_questions(path))
+        except QuestionFileError as err:
+            prefix = "Round %d: " % number if len(paths) > 1 else ""
+            errors.append(prefix + str(err))
+    if errors:
+        raise QuestionFileError("\n\n".join(errors))
+    return boards
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Classroom Jeopardy. The board size (%dx%d to %dx%d) is read from the CSV."
                     % (MIN_SIDE, MIN_SIDE, MAX_SIDE, MAX_SIDE))
-    parser.add_argument("csv_file", help="question set, e.g. myset.csv")
+    parser.add_argument("csv_files", metavar="CSV[,CSV...]",
+                        help="question set, e.g. myset.csv; for several rounds give a "
+                             "comma-separated list, played in order, e.g. r1.csv,r2.csv")
     parser.add_argument("--teams", help='team names, e.g. --teams "Kea,Weta,Tuatara"')
     parser.add_argument("--time", type=int, default=30, metavar="SECONDS",
                         help="seconds allowed per question (default 30)")
@@ -535,23 +671,25 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     try:
-        board = load_questions(args.csv_file)
+        boards = load_rounds(parse_csv_list(args.csv_files))
         teams = parse_teams(args.teams) if args.teams else None
     except QuestionFileError as err:
         sys.stderr.write("\n%s\n\n" % err)
         return 2
 
     if args.check:
-        print("%s looks good: %d x %d board, %d questions, %d points at the top."
-              % (os.path.basename(args.csv_file), board.n_rows, board.n_cols,
-                 len(board.questions), board.n_rows * POINTS_STEP))
-        for i, name in enumerate(board.categories):
-            print("  Col %d: %s" % (i, name))
+        for number, board in enumerate(boards, 1):
+            prefix = "Round %d: " % number if len(boards) > 1 else ""
+            print("%s%s looks good: %d x %d board, %d questions, %d points at the top."
+                  % (prefix, os.path.basename(board.path), board.n_rows, board.n_cols,
+                     len(board.questions), board.n_rows * POINTS_STEP))
+            for i, name in enumerate(board.categories):
+                print("  Col %d: %s" % (i, name))
         return 0
 
     if teams is None:
         teams = ask_teams()
-    Game(board, teams, time_limit=max(5, args.time), buzzer=args.buzzer).run()
+    Game(boards, teams, time_limit=max(5, args.time), buzzer=args.buzzer).run()
     return 0
 
 
