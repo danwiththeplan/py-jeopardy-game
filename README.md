@@ -33,7 +33,7 @@ Clone the repository and install the dependencies:
 ```shell
 git clone https://github.com/danwiththeplan/py-jeopardy-game.git
 cd py-jeopardy-game
-poetry install --no-root
+poetry install
 ```
 
 Poetry creates a virtual environment for the project and installs pygame into it. You only need to do this once.
