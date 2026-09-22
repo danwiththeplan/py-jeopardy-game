@@ -2,11 +2,18 @@
 """
 Classroom Jeopardy - reads any question set from 3x3 up to 8x8.
 
-    python3 jeopardy4.py myset.csv
-    python3 jeopardy4.py myset.csv --check            # validate the file only
-    python3 jeopardy4.py myset.csv --teams "Kea,Weta" --time 45
-    python3 jeopardy4.py round1.csv,round2.csv,final.csv   # three rounds, in order
-    python3 jeopardy4.py myset.csv --ticktock ""      # no ticking clock
+Dependencies are managed with Poetry (see pyproject.toml). Install once with
+`poetry install`, then run the game with `poetry run` in front of the usual
+command:
+
+    poetry run python jeopardy.py myset.csv
+    poetry run python jeopardy.py myset.csv --check            # validate the file only
+    poetry run python jeopardy.py myset.csv --teams "Kea,Weta" --time 45
+    poetry run python jeopardy.py round1.csv,round2.csv,final.csv   # three rounds, in order
+    poetry run python jeopardy.py myset.csv --ticktock ""      # no ticking clock
+
+(If a `jeopardy` script entry point is defined in pyproject.toml, `poetry run
+jeopardy myset.csv` works the same way, without "python" in front.)
 
 While a question's timer is running, ticktock.wav (or the --ticktock file)
 loops in the background, if it exists. It stops when the answer is revealed,
