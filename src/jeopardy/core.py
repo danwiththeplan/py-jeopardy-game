@@ -7,6 +7,16 @@ Classroom Jeopardy - reads any question set from 3x3 up to 8x8.
     jeopardy round1.csv,round2.csv,final.csv   # three rounds, in order
     jeopardy myset.csv --ticktock ""      # no ticking clock
     jeopardy myset.csv --buzzer ""        # no buzzer
+    jeopardy myset.csv --mode savage      # penalties on, steals worth full points
+
+Scoring modes (--mode, default nice):
+    nice    a wrong answer costs nothing; a steal earns half the points
+    savage  a wrong answer costs the full value; a steal earns the full points
+
+Steals: the team that picked the square answers. If they are marked WRONG
+on the answer screen, a steal screen follows: click every other team that got
+it right (click again to un-select), then AWARD STEALS (or ENTER) gives them
+all the steal points at once.
 
 While a question's timer is running, ticktock.wav (or the --ticktock file)
 loops in the background, if it exists. It stops when the answer is revealed,
@@ -36,8 +46,8 @@ Controls:
     Click a value on the board            -> question appears, timer starts
     Click the question / SPACE            -> reveal the answer
     P                                      -> pause / resume the timer
-    CORRECT / WRONG buttons, or Y / N     -> score it and go back to the board
-    Click another team while a question is up -> steals it for that team
+    CORRECT / WRONG buttons, or Y / N     -> score the team that picked the square
+    Steal screen: click teams, then AWARD STEALS / ENTER -> steal points for all of them
     ESC back to the board   R restart timer   F fullscreen   Q quit
     END ROUND button (bottom right), click twice to confirm, or PAGE DOWN
                                           -> end this round early, go to the next
@@ -61,6 +71,7 @@ MIN_SIDE, MAX_SIDE = 3, 8
 REQUIRED_COLUMNS = ("Row", "Col", "Question", "Answer", "Categories")
 POINTS_STEP = 100
 MAX_TEAMS = 8
+MODES = ("nice", "savage")
 WIN_W, WIN_H = 1200, 820
 CONFIRM_SECONDS = 3             # how long the END ROUND button waits for a second click
 PAGE_DOWN_KEYS = (pygame.K_PAGEDOWN, pygame.K_KP3)       # KP3 = numpad PgDn, NumLock off
@@ -227,12 +238,23 @@ def load_questions(path):
     return Board(categories, questions, n_rows, n_cols, path)
 
 
+def score_change(points, correct, steal, mode):
+    """Points won or lost for one answer. Nice mode has no penalty and pays
+    half for a steal; savage mode pays and penalises the full value."""
+    if correct:
+        return points // 2 if steal and mode == "nice" else points
+    return 0 if mode == "nice" else -points
+
+
 # ------------------------------------------------------------------- game --
 class Game(object):
     def __init__(self, boards, teams, time_limit=30, buzzer="buzzer2.wav",
-                 ticktock="ticktock.wav"):
+                 ticktock="ticktock.wav", mode="nice"):
         if isinstance(boards, Board):
             boards = [boards]
+        if mode not in MODES:
+            raise ValueError("mode must be one of %s" % ", ".join(MODES))
+        self.mode = mode
         self.boards = list(boards)
         self.round_index = 0
         self.teams = teams
@@ -241,7 +263,9 @@ class Game(object):
         self.buzzer = find_sound(buzzer)
         self.used = set()
         self.team_index = -1
-        self.state = "board"            # board | question | answer | round_over | game_over
+        self.opener = -1                # the team that picked the current square
+        self.stealers = set()           # teams chosen on the steal screen
+        self.state = "board"            # board | question | answer | steal | round_over | game_over
         self.current = None
         self.started = 0.0
         self.buzzed = False
@@ -289,7 +313,7 @@ class Game(object):
         name = os.path.basename(self.board.path)
         if self.multi_round:
             name = "%s - %s" % (self.round_label(), name)
-        pygame.display.set_caption("Jeopardy - %s" % name)
+        pygame.display.set_caption("Jeopardy (%s mode) - %s" % (self.mode, name))
 
     def round_finished(self):
         return len(self.used) >= self.board.n_rows * self.board.n_cols
@@ -298,8 +322,8 @@ class Game(object):
         """Leave the current round: on to the next one, or to the winner screen
         if this was the final round."""
         self.confirm_until = 0.0
+        self.close_question()
         self.state = "round_over" if self.has_next_round else "game_over"
-        self.current, self.team_index = None, -1
 
     def winners(self):
         best = max(self.scores)
@@ -317,7 +341,7 @@ class Game(object):
             return
         self.round_index += 1
         self.used = set()
-        self.state, self.current, self.team_index = "board", None, -1
+        self.close_question()
         self.set_caption()
 
     # -- geometry ----------------------------------------------------------
@@ -367,6 +391,9 @@ class Game(object):
         y = self.board_h - 110
         return ((self.w / 8.0, y, w, h), (self.w * 5 / 8.0, y, w, h))
 
+    def award_rect(self):
+        return (self.w * 3 / 8.0, self.board_h - 110, self.w / 4.0, 80)
+
     @staticmethod
     def points(row):
         return row * POINTS_STEP
@@ -377,12 +404,15 @@ class Game(object):
         width = self.teams_w / float(len(self.teams))
         for i, name in enumerate(self.teams):
             box = pygame.Rect(i * width + 4, self.board_h + 4, width - 8, self.score_h - 8)
-            pygame.draw.rect(self.screen, BLUE if i == self.team_index else DARK, box)
-            pygame.draw.rect(self.screen, GOLD if i == self.team_index else GREY, box, 3)
+            chosen = i == self.team_index or i in self.stealers
+            out = self.state == "steal" and i == self.opener    # got it wrong, can't steal
+            pygame.draw.rect(self.screen, BLUE if chosen else DARK, box)
+            pygame.draw.rect(self.screen, GOLD if chosen else (RED if out else GREY), box, 3)
             draw_text(self.screen, name, (box.x, box.y + 6, box.w, box.h * 0.40),
-                      WHITE, 30, 11, True)
+                      GREY if out else WHITE, 30, 11, True)
             draw_text(self.screen, str(self.scores[i]),
-                      (box.x, box.y + box.h * 0.42, box.w, box.h * 0.52), GOLD, 46, 14, True)
+                      (box.x, box.y + box.h * 0.42, box.w, box.h * 0.52),
+                      GREY if out else GOLD, 46, 14, True)
         button = self.end_round_rect()
         if button:
             armed = time.perf_counter() < self.confirm_until
@@ -466,8 +496,10 @@ class Game(object):
             self.current, {"question": "No question for this square.", "answer": "-"})
         name = self.board.categories[col] if col < len(self.board.categories) else ""
         top = self.board_h
-        draw_text(self.screen, "%s  -  %d points" % (name, self.points(row)),
-                  (0, 20, self.w, 46), GOLD, 34, 14, True)
+        heading = "%s  -  %d points" % (name, self.points(row))
+        if self.state == "steal":
+            heading += "  -  STEALS"
+        draw_text(self.screen, heading, (0, 20, self.w, 46), GOLD, 34, 14, True)
         draw_text(self.screen, item["question"],
                   (60, top * 0.13, self.w - 120, top * 0.40), WHITE, 54, 16, True)
 
@@ -481,14 +513,26 @@ class Game(object):
             draw_text(self.screen, hint, (0, top - 50, self.w, 40), WHITE, 24, 12)
             if left == 0 and not self.buzzed:
                 self.buzz()
-        else:
-            draw_text(self.screen, item["answer"],
-                      (60, top * 0.55, self.w - 120, top * 0.26), GOLD, 46, 14, True)
+            self.draw_score_bar()
+            return
+
+        draw_text(self.screen, item["answer"],
+                  (60, top * 0.55, self.w - 120, top * 0.26), GOLD, 46, 14, True)
+        if self.state == "answer":
             right, wrong = self.button_rects()
+            loss = self.award(False)
             pygame.draw.rect(self.screen, GREEN, right)
             pygame.draw.rect(self.screen, RED, wrong)
-            draw_text(self.screen, "CORRECT  +%d" % self.points(row), right, WHITE, 30, 12, True)
-            draw_text(self.screen, "WRONG  -%d" % self.points(row), wrong, WHITE, 30, 12, True)
+            draw_text(self.screen, "CORRECT  +%d" % self.award(True), right, WHITE, 30, 12, True)
+            draw_text(self.screen, "WRONG  %d" % loss if loss else "WRONG", wrong,
+                      WHITE, 30, 12, True)
+        else:
+            draw_text(self.screen, "click every team that got it right (+%d each), then AWARD"
+                      % self.award(True, steal=True), (0, top * 0.79, self.w, 34), WHITE, 24, 12)
+            button = self.award_rect()
+            pygame.draw.rect(self.screen, GREEN if self.stealers else GREY, button)
+            draw_text(self.screen, "AWARD STEALS" if self.stealers else "NO STEALS",
+                      button, WHITE, 30, 12, True)
         self.draw_score_bar()
 
     # -- actions -----------------------------------------------------------
@@ -534,16 +578,52 @@ class Game(object):
             return
         self.used.add(cell)
         self.current = cell
+        self.opener = self.team_index
+        self.stealers = set()
         self.state = "question"
         self.started = time.perf_counter()
         self.buzzed = False
         self.paused = False
 
-    def score(self, correct):
-        row, _ = self.current
-        if self.team_index >= 0:
-            self.scores[self.team_index] += self.points(row) * (1 if correct else -1)
+    def close_question(self):
         self.state, self.current, self.team_index = "board", None, -1
+        self.opener, self.stealers = -1, set()
+
+    def reveal(self):
+        if self.state == "question" and not self.paused:
+            self.state = "answer"
+
+    def award(self, correct, steal=False):
+        """Points for a right or wrong answer, from the picking team or a stealer."""
+        row, _ = self.current
+        return score_change(self.points(row), correct, steal, self.mode)
+
+    def select_team(self, team):
+        """Click on a team: on the board it picks who chooses the next square;
+        on the steal screen it adds or removes a stealer. The picking team is
+        fixed while a question is up."""
+        if self.state == "board":
+            self.team_index = team
+        elif self.state == "steal" and team != self.opener:
+            self.stealers ^= {team}
+
+    def score(self, correct):
+        """Score the team that picked the square. Wrong opens the steal screen."""
+        if self.state != "answer":
+            return
+        self.scores[self.team_index] += self.award(correct)
+        if not correct and len(self.teams) > 1:
+            self.state, self.team_index = "steal", -1
+        else:
+            self.close_question()
+
+    def award_steals(self):
+        """Give every chosen stealer the steal points, then back to the board."""
+        if self.state != "steal":
+            return
+        for team in self.stealers:
+            self.scores[team] += self.award(True, steal=True)
+        self.close_question()
 
     def resize(self, size):
         self.w, self.h = max(640, size[0]), max(480, size[1])
@@ -577,17 +657,19 @@ class Game(object):
             elif self.is_page_down(event):
                 self.end_round()
             elif event.key == pygame.K_ESCAPE:
-                self.state, self.current, self.team_index = "board", None, -1
+                self.close_question()
             elif event.key == pygame.K_r and self.state == "question":
                 self.started, self.buzzed, self.paused = time.perf_counter(), False, False
             elif event.key == pygame.K_p and self.state == "question":
                 self.toggle_pause()
-            elif event.key == pygame.K_SPACE and self.state == "question" and not self.paused:
-                self.state = "answer"
-            elif event.key == pygame.K_y and self.state == "answer":
+            elif event.key == pygame.K_SPACE and self.state == "question":
+                self.reveal()
+            elif event.key == pygame.K_y:
                 self.score(True)
-            elif event.key == pygame.K_n and self.state == "answer":
+            elif event.key == pygame.K_n:
                 self.score(False)
+            elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                self.award_steals()
             return True
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -606,22 +688,24 @@ class Game(object):
                 return True
             team = self.team_at(event.pos)
             if team is not None:
-                self.team_index = team
-                if self.state == "question":
-                    self.started, self.buzzed = time.perf_counter(), False
+                self.select_team(team)
                 return True
             if self.state == "board":
                 cell = self.cell_at(event.pos)
                 if cell:
                     self.open_cell(cell)
-            elif self.state == "question" and not self.paused:
-                self.state = "answer"
+                return True
+            if self.state == "question":
+                self.reveal()
             elif self.state == "answer":
                 right, wrong = self.button_rects()
                 if pygame.Rect(right).collidepoint(event.pos):
                     self.score(True)
                 elif pygame.Rect(wrong).collidepoint(event.pos):
                     self.score(False)
+            elif self.state == "steal":
+                if pygame.Rect(self.award_rect()).collidepoint(event.pos):
+                    self.award_steals()
         return True
 
     def run(self):
@@ -712,6 +796,10 @@ def main(argv=None):
     parser.add_argument("--ticktock", default="ticktock.wav", metavar="WAV",
                         help="sound looped while the timer runs, if the file exists "
                              '(default ticktock.wav; --ticktock "" for silence)')
+    parser.add_argument("--mode", choices=MODES, default="nice",
+                        help="nice (default): no penalty for a wrong answer, a steal earns "
+                             "half the points; savage: a wrong answer loses the full value, "
+                             "a steal earns the full points")
     parser.add_argument("--check", action="store_true",
                         help="check the CSV and print a summary without starting the game")
     args = parser.parse_args(argv)
@@ -736,7 +824,7 @@ def main(argv=None):
     if teams is None:
         teams = ask_teams()
     Game(boards, teams, time_limit=max(5, args.time), buzzer=args.buzzer,
-         ticktock=args.ticktock).run()
+         ticktock=args.ticktock, mode=args.mode).run()
     return 0
 
 

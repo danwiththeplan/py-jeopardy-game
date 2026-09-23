@@ -11,7 +11,8 @@ Questions are stored in a plain CSV file that you can edit in any spreadsheet pr
 - A countdown timer for each question, with an optional ticking clock and time-up buzzer, and a pause/resume control
 - A silent mode (`--buzzer ""`) for classrooms where the buzzer sound isn't wanted
 - Multiple rounds from separate CSV files, with scores carried over between rounds
-- Steals: another team can take over a question while it is on screen
+- Steals: when a team gets a question wrong, every other team that got it right can be given steal points at once
+- Two scoring modes: `--mode nice` (the default, no penalties and half points for a steal) and `--mode savage` (full penalties and full points for a steal)
 - A winner screen with a full ranking (ties are handled)
 - A `--check` mode that validates a question file and explains exactly what is wrong with it
 - Resizable window and fullscreen mode for projectors
@@ -77,6 +78,7 @@ poetry run jeopardy myset.csv --teams "Kea,Weta,Tuatara"
 | `--time SECONDS` | Seconds allowed per question (default 30, minimum 5). |
 | `--buzzer FILE.wav` | Sound played when time runs out (default `buzzer2.wav`). Use `--buzzer ""` for silent mode (no buzzer). |
 | `--ticktock FILE.wav` | Sound looped while the timer runs (default `ticktock.wav`). Use `--ticktock ""` for silence. |
+| `--mode nice` / `--mode savage` | Scoring mode (default `nice`). See [Scoring](#scoring). |
 | `--check` | Check the CSV file(s) and print a summary without starting the game. |
 
 Examples:
@@ -84,6 +86,7 @@ Examples:
 ```shell
 poetry run jeopardy myset.csv --check
 poetry run jeopardy myset.csv --teams "Kea,Weta" --time 45
+poetry run jeopardy myset.csv --mode savage
 poetry run jeopardy myset.csv --ticktock ""
 poetry run jeopardy myset.csv --buzzer ""
 ```
@@ -143,7 +146,7 @@ A few tips:
 | Open a question | Click a value on the board (a team must be selected first) |
 | Reveal the answer | Click the question, or press SPACE |
 | Score the answer | Click CORRECT or WRONG, or press Y or N |
-| Steal a question | Click a different team while the question is on screen (the timer restarts) |
+| Award steals | On the steal screen, click each team that got it right (click again to unselect), then click AWARD STEALS or press ENTER |
 | Pause / resume the timer | P |
 | Restart the timer | R |
 | Back to the board | ESC |
@@ -152,7 +155,21 @@ A few tips:
 | Toggle fullscreen | F |
 | Quit | Q |
 
-A wrong answer subtracts the question's points from the answering team. The winner screen appears automatically once the last square of the final round has been played, and the final scores are also printed in the terminal when you quit.
+The winner screen appears automatically once the last square of the final round has been played, and the final scores are also printed in the terminal when you quit.
+
+## Scoring
+
+The team that picks a square answers it. While the timer runs, the other teams can work out (and write down) their own answers. Once the picking team has answered, reveal the answer and mark them CORRECT or WRONG. The picking team can't be changed while the question is up.
+
+If they were WRONG, a steal screen appears. The picking team is shown greyed out with a red border. Click every other team that got it right; they light up, and clicking again unselects. Then click **AWARD STEALS** (or press ENTER) to give all of them the steal points at once. With no teams selected, the button reads **NO STEALS** and just goes back to the board. ESC also leaves without awarding anything.
+
+| | `--mode nice` (default) | `--mode savage` |
+| --- | --- | --- |
+| Picking team right | + full value | + full value |
+| Picking team wrong | no penalty | − full value |
+| Each team awarded a steal | + half the value | + full value |
+
+The current mode is shown in the window title, and the buttons always show exactly what will be gained or lost.
 
 ## Sounds
 
