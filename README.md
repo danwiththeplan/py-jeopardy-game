@@ -16,6 +16,7 @@ Questions are stored in a plain CSV file that you can edit in any spreadsheet pr
 - A winner screen with a full ranking (ties are handled)
 - A `--check` mode that validates a question file and explains exactly what is wrong with it
 - Resizable window and fullscreen mode for projectors
+- A setup window (`jeopardy-gui`) for running the game without the command line, which can be packaged as a Windows `.exe`
 
 ## Requirements
 
@@ -75,7 +76,7 @@ poetry run jeopardy myset.csv --teams "Kea,Weta,Tuatara"
 | Option | What it does |
 | --- | --- |
 | `--teams "A,B,C"` | Team names, separated by commas (1 to 8 teams). If omitted, you are prompted. |
-| `--time SECONDS` | Seconds allowed per question (default 30, minimum 5). |
+| `--time SECONDS` | Seconds allowed per question (default 30, minimum 5). Use `--time 0` for no time limit. |
 | `--buzzer FILE.wav` | Sound played when time runs out (default `buzzer2.wav`). Use `--buzzer ""` for silent mode (no buzzer). |
 | `--ticktock FILE.wav` | Sound looped while the timer runs (default `ticktock.wav`). Use `--ticktock ""` for silence. |
 | `--mode nice` / `--mode savage` | Scoring mode (default `nice`). See [Scoring](#scoring). |
@@ -102,6 +103,35 @@ poetry run jeopardy round1.csv,round2.csv,final.csv
 ```
 
 When every square in a round has been played, a "Round complete" screen appears. Click or press ENTER to start the next round.
+
+### Using the setup window instead
+
+```shell
+poetry run jeopardy-gui
+```
+
+A setup window opens in place of the command-line options:
+
+- **Rounds**: click **Add files...** to choose 1 to 10 question-set CSV files. Each file is one round, played from the top of the list down; use **Move up** / **Move down** to reorder them.
+- **Teams**: set the number of teams (1 to 8) and type their names. Any left blank become Team 1, Team 2, and so on.
+- **Time per question**: 15, 30, 45 or 60 seconds, or **No limit**. With no limit there is no countdown, no ticking and no buzzer; reveal the answer whenever you're ready.
+- **Savage mode**: tick for `--mode savage` scoring (see [Scoring](#scoring)).
+- **Silent mode**: tick to turn off both the ticking clock and the time-up buzzer.
+
+**START GAME** checks every file first. If anything is wrong, it lists the problems the same way `--check` does. Otherwise the setup window closes and the game starts.
+
+The setup window uses tkinter, which comes with the standard Python installers for Windows and macOS. On Debian or Ubuntu, install it with `sudo apt install python3-tk`.
+
+### Building the Windows executable
+
+The executable has to be built on Windows (PyInstaller can't cross-compile). With the project installed as above:
+
+```shell
+poetry run pip install pyinstaller
+poetry run pyinstaller jeopardy.spec
+```
+
+This produces `dist/Jeopardy.exe`, a single file with the sounds built in. It opens the setup window and runs on any Windows PC without Python installed. Keep the question-set CSV files wherever you like and choose them with **Add files...**.
 
 ## Creating a question set
 

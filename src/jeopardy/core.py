@@ -4,6 +4,7 @@ Classroom Jeopardy - reads any question set from 3x3 up to 8x8.
     jeopardy myset.csv
     jeopardy myset.csv --check            # validate the file only
     jeopardy myset.csv --teams "Kea,Weta" --time 45
+    jeopardy myset.csv --time 0           # no time limit
     jeopardy round1.csv,round2.csv,final.csv   # three rounds, in order
     jeopardy myset.csv --ticktock ""      # no ticking clock
     jeopardy myset.csv --buzzer ""        # no buzzer
@@ -65,7 +66,7 @@ import time
 
 import pygame
 
-from jeopardy.utils import draw_text, find_sound, whole_number
+from jeopardy.utils import draw_text, find_sound, forget_fonts, whole_number
 
 MIN_SIDE, MAX_SIDE = 3, 8
 REQUIRED_COLUMNS = ("Row", "Col", "Question", "Answer", "Categories")
@@ -506,10 +507,18 @@ class Game(object):
         if self.state == "question":
             left = self.time_left()
             colour = WHITE if self.paused else (RED if left <= 5 else GOLD)
-            text = "PAUSED" if self.paused else ("TIME UP" if left == 0 else "%0.0f" % left)
+            if not self.timed:
+                colour, text = WHITE, "NO TIME LIMIT"
+            elif self.paused:
+                text = "PAUSED"
+            else:
+                text = "TIME UP" if left == 0 else "%0.0f" % left
             draw_text(self.screen, text, (0, top * 0.62, self.w, top * 0.16), colour, 80, 24, True)
-            hint = ("paused - press P to resume" if self.paused else
-                    "click anywhere or press SPACE to reveal the answer  -  P to pause")
+            hint = "click anywhere or press SPACE to reveal the answer"
+            if self.paused:
+                hint = "paused - press P to resume"
+            elif self.timed:
+                hint += "  -  P to pause"
             draw_text(self.screen, hint, (0, top - 50, self.w, 40), WHITE, 24, 12)
             if left == 0 and not self.buzzed:
                 self.buzz()
@@ -536,13 +545,20 @@ class Game(object):
         self.draw_score_bar()
 
     # -- actions -----------------------------------------------------------
+    @property
+    def timed(self):
+        return self.time_limit is not None
+
     def time_left(self):
+        """Seconds left on the clock; infinite when there is no time limit."""
+        if not self.timed:
+            return float("inf")
         now = self.pause_started if self.paused else time.perf_counter()
         return max(0, self.time_limit - (now - self.started))
 
     def toggle_pause(self):
         """Pause or resume the countdown while a question is up."""
-        if self.state != "question":
+        if self.state != "question" or not self.timed:
             return
         if self.paused:
             self.started += time.perf_counter() - self.pause_started
@@ -557,7 +573,8 @@ class Game(object):
         (reveal, ESC, time up, ending the round) stops the sound."""
         if self.ticktock is None:
             return
-        wanted = self.state == "question" and not self.paused and self.time_left() > 0
+        wanted = (self.timed and self.state == "question" and not self.paused
+                  and self.time_left() > 0)
         if wanted and not self.ticking:
             self.ticktock.play(loops=-1)
         elif not wanted and self.ticking:
@@ -727,6 +744,7 @@ class Game(object):
             pygame.display.update()
             self.clock.tick(30)
         pygame.quit()
+        forget_fonts()
         print("\nFinal scores")
         winners = self.winners()
         for i in self.ranking():
@@ -789,7 +807,7 @@ def main(argv=None):
                              "comma-separated list, played in order, e.g. r1.csv,r2.csv")
     parser.add_argument("--teams", help='team names, e.g. --teams "Kea,Weta,Tuatara"')
     parser.add_argument("--time", type=int, default=30, metavar="SECONDS",
-                        help="seconds allowed per question (default 30)")
+                        help="seconds allowed per question (default 30, 0 for no limit)")
     parser.add_argument("--buzzer", default="buzzer2.wav", metavar="WAV",
                         help="sound played at time up, if the file exists "
                              '(default buzzer2.wav; --buzzer "" for silent mode, no buzzer)')
@@ -823,7 +841,8 @@ def main(argv=None):
 
     if teams is None:
         teams = ask_teams()
-    Game(boards, teams, time_limit=max(5, args.time), buzzer=args.buzzer,
+    time_limit = max(5, args.time) if args.time > 0 else None
+    Game(boards, teams, time_limit=time_limit, buzzer=args.buzzer,
          ticktock=args.ticktock, mode=args.mode).run()
     return 0
 

@@ -17,6 +17,7 @@ pytest = "^8.0"
 
 [tool.poetry.scripts]
 jeopardy = "jeopardy.core:main"
+jeopardy-gui = "jeopardy.gui:main"
 
 
 [build-system]

@@ -39,6 +39,11 @@ def get_font(size, bold=False):
     return _FONTS[(size, bold)]
 
 
+def forget_fonts():
+    """Drop cached fonts; they are unusable once pygame.quit() has run."""
+    _FONTS.clear()
+
+
 def wrap(font, text, max_w, hard=False):
     """Split `text` into lines that fit `max_w`. With hard=True, over-long
     words are broken mid-word rather than allowed to overflow."""
