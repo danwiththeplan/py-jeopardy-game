@@ -7,6 +7,7 @@ Questions are stored in a plain CSV file that you can edit in any spreadsheet pr
 ## Features
 
 - Boards of any size from 3×3 up to 8×8, read automatically from the CSV
+- Optional pictures (PNG or JPG) shown above a question
 - Up to 8 teams, with scores shown along the bottom of the screen
 - A countdown timer for each question, with an optional ticking clock and time-up buzzer, and a pause/resume control
 - A silent mode (`--buzzer ""`) for classrooms where the buzzer sound isn't wanted
@@ -115,6 +116,14 @@ Each question set is a CSV file with these five columns (extra columns are ignor
 | `Answer` | The answer revealed afterwards. |
 | `Categories` | Category names, one per line, down the first few lines of the file. The first name is column 0, the second is column 1, and so on. |
 
+You can also add an optional `Picture` column:
+
+| Column | Meaning |
+| --- | --- |
+| `Picture` | The path of a `.png` or `.jpg` file to show above the question, e.g. `/home/me/pics/cell.png`. A relative path (such as `pics/cell.png`) is taken from the folder the CSV file is in. Leave it blank for questions without a picture. |
+
+The picture is scaled to fit above the question and stays on screen when the answer is revealed. If a picture file can't be found or isn't a PNG or JPG, the game prints a warning and shows that question without it.
+
 The board size comes from the file itself: the number of columns is the highest `Col` plus one, and the number of rows is the highest `Row`. Every square on the board must have a question.
 
 Here is a complete 3×3 example:
@@ -136,7 +145,7 @@ A few tips:
 
 - Build the file in Excel, Google Sheets or LibreOffice and save it as **CSV UTF-8**. An `.xlsx` file won't load.
 - It's fine to repeat the category name on every line of its column instead of listing each one once.
-- Always run `--check` on a new file first. If anything is wrong, such as a missing answer, a duplicated square or a gap in the board, it lists every problem with its line number.
+- Always run `--check` on a new file first. If anything is wrong, such as a missing answer, a duplicated square or a gap in the board, it lists every problem with its line number. It also warns about any picture it can't find.
 
 ## Controls
 

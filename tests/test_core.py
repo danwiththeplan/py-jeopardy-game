@@ -14,8 +14,57 @@ def test_valid_board_loads(valid_csv):
     board = load_questions(valid_csv)
     assert (board.n_rows, board.n_cols) == (3, 3)
     assert board.categories == ["Cells", "Genetics", "Ecology"]
-    assert board.questions[(1, 0)] == {"question": "The basic unit of life", "answer": "The cell"}
+    assert board.questions[(1, 0)] == {"question": "The basic unit of life", "answer": "The cell",
+                                       "picture": None}
     assert len(board.questions) == 9
+    assert board.warnings == []
+
+
+# ------------------------------------------------------------------- pictures --
+def _with_pictures(valid_csv, pictures):
+    """VALID_3X3 with a Picture column; `pictures` maps line index -> text."""
+    lines = open(valid_csv).read().splitlines()
+    lines[0] += ",Picture"
+    for i in range(1, len(lines)):
+        lines[i] += "," + pictures.get(i, "")
+    return "\n".join(lines) + "\n"
+
+
+def test_picture_with_full_path_is_kept(write_csv, valid_csv, tmp_path):
+    picture = tmp_path / "cell.png"
+    picture.write_bytes(b"")
+    board = load_questions(write_csv("pics.csv", _with_pictures(valid_csv, {1: str(picture)})))
+    assert board.questions[(1, 0)]["picture"] == str(picture)
+    assert board.questions[(2, 0)]["picture"] is None
+    assert board.warnings == []
+
+
+def test_picture_path_is_relative_to_csv_folder(write_csv, valid_csv, tmp_path):
+    (tmp_path / "img").mkdir()
+    (tmp_path / "img" / "dna.JPG").write_bytes(b"")
+    board = load_questions(write_csv("pics.csv", _with_pictures(valid_csv, {4: "img/dna.JPG"})))
+    assert board.questions[(1, 1)]["picture"] == str(tmp_path / "img" / "dna.JPG")
+
+
+def test_picture_column_name_is_not_case_sensitive(write_csv, valid_csv, tmp_path):
+    (tmp_path / "cell.jpeg").write_bytes(b"")
+    text = _with_pictures(valid_csv, {1: "cell.jpeg"}).replace("Picture", "PICTURE", 1)
+    board = load_questions(write_csv("pics.csv", text))
+    assert board.questions[(1, 0)]["picture"] == str(tmp_path / "cell.jpeg")
+
+
+def test_missing_picture_is_a_warning_not_an_error(write_csv, valid_csv, tmp_path):
+    board = load_questions(write_csv("pics.csv", _with_pictures(valid_csv, {2: "nope.png"})))
+    assert board.questions[(2, 0)]["picture"] is None
+    assert len(board.warnings) == 1
+    assert "line 3: Row 2, Col 0 picture not found" in board.warnings[0]
+
+
+def test_unsupported_picture_type_is_a_warning(write_csv, valid_csv, tmp_path):
+    (tmp_path / "cell.gif").write_bytes(b"")
+    board = load_questions(write_csv("pics.csv", _with_pictures(valid_csv, {1: "cell.gif"})))
+    assert board.questions[(1, 0)]["picture"] is None
+    assert "not a PNG or JPG" in board.warnings[0]
 
 
 def test_missing_file_raises():

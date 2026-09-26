@@ -1,8 +1,9 @@
 import os
 
+import pygame
 import pytest
 
-from jeopardy.utils import find_sound, get_font, whole_number, wrap
+from jeopardy.utils import draw_picture, find_sound, get_font, whole_number, wrap
 
 
 # ------------------------------------------------------------------ whole_number --
@@ -73,3 +74,24 @@ def test_wrap_hard_breaks_overlong_word():
     lines = wrap(font, long_word, narrow_width, hard=True)
     assert len(lines) > 1
     assert "".join(lines) == long_word
+
+
+# ------------------------------------------------------------------- draw_picture --
+def test_draw_picture_fits_inside_rect_keeping_shape(tmp_path):
+    path = str(tmp_path / "wide.png")
+    picture = pygame.Surface((400, 100))
+    picture.fill((255, 0, 0))
+    pygame.image.save(picture, path)
+
+    target = pygame.Surface((300, 300))
+    assert draw_picture(target, path, (0, 0, 200, 200)) is True
+    # 400x100 scaled to 200x50, centred vertically: rows 75-124 are red
+    assert target.get_at((100, 100))[:3] == (255, 0, 0)
+    assert target.get_at((100, 60))[:3] == (0, 0, 0)
+    assert target.get_at((250, 100))[:3] == (0, 0, 0)
+
+
+def test_draw_picture_unreadable_file_draws_nothing(tmp_path):
+    path = tmp_path / "broken.png"
+    path.write_bytes(b"not a png")
+    assert draw_picture(pygame.Surface((50, 50)), str(path), (0, 0, 50, 50)) is False

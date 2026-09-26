@@ -1,11 +1,14 @@
 """Generic helpers used by the game: number parsing, sound lookup, and the
-pygame text-fitting routines used to draw everything on the board."""
+pygame text-fitting and picture-fitting routines used to draw everything on
+the board."""
 
 import os
 
 import pygame
 
 _FONTS = {}
+_PICTURES = {}          # path -> loaded image, or None if it could not be loaded
+_SCALED = {}            # (path, width, height) -> image scaled to fit that box
 
 
 def whole_number(value):
@@ -31,6 +34,39 @@ def find_sound(name):
         if os.path.isfile(path):
             return path
     return None
+
+
+def load_picture(path):
+    """Load the image at `path` once and keep it. None if it can't be loaded."""
+    if path not in _PICTURES:
+        try:
+            image = pygame.image.load(path)
+            if pygame.display.get_surface() is not None:
+                image = image.convert_alpha()
+        except (pygame.error, OSError):
+            image = None
+        _PICTURES[path] = image
+    return _PICTURES[path]
+
+
+def draw_picture(surface, path, rect):
+    """Draw the picture at `path` as large as it fits inside `rect`, keeping
+    its shape, centred. Returns False (and draws nothing) if it can't be loaded."""
+    image = load_picture(path)
+    x, y, w, h = [int(v) for v in rect]
+    if image is None or w < 1 or h < 1:
+        return False
+    key = (path, w, h)
+    if key not in _SCALED:
+        scale = min(w / float(image.get_width()), h / float(image.get_height()))
+        size = (max(1, int(image.get_width() * scale)), max(1, int(image.get_height() * scale)))
+        try:
+            _SCALED[key] = pygame.transform.smoothscale(image, size)
+        except ValueError:                        # smoothscale needs 24/32-bit images
+            _SCALED[key] = pygame.transform.scale(image, size)
+    scaled = _SCALED[key]
+    surface.blit(scaled, (x + (w - scaled.get_width()) // 2, y + (h - scaled.get_height()) // 2))
+    return True
 
 
 def get_font(size, bold=False):

@@ -35,6 +35,11 @@ The CSV needs these five columns (extra columns are ignored):
     1,0,Some question,Some answer,First Category
     2,0,...,...,Second Category
 
+An optional Picture column gives the path of a PNG or JPG file to show above
+the question (a relative path is taken from the CSV file's folder). Leave it
+blank for questions without a picture. A picture that is missing or not a
+PNG/JPG gives a warning, and the question is shown without it.
+
 Row 1 is the cheapest row (100 points), Row 2 is 200, and so on. Col is
 zero-based and matches the order of the category names, which go one per
 line down the Categories column of the first few lines. The board size is
@@ -65,10 +70,12 @@ import time
 
 import pygame
 
-from jeopardy.utils import draw_text, find_sound, whole_number
+from jeopardy.utils import draw_picture, draw_text, find_sound, whole_number
 
 MIN_SIDE, MAX_SIDE = 3, 8
 REQUIRED_COLUMNS = ("Row", "Col", "Question", "Answer", "Categories")
+OPTIONAL_COLUMNS = ("Picture",)
+PICTURE_TYPES = (".png", ".jpg", ".jpeg")
 POINTS_STEP = 100
 MAX_TEAMS = 8
 MODES = ("nice", "savage")
@@ -92,12 +99,13 @@ class QuestionFileError(Exception):
 
 
 class Board(object):
-    def __init__(self, categories, questions, n_rows, n_cols, path):
+    def __init__(self, categories, questions, n_rows, n_cols, path, warnings=()):
         self.categories = categories
         self.questions = questions
         self.n_rows = n_rows
         self.n_cols = n_cols
         self.path = path
+        self.warnings = list(warnings)     # problems that don't stop the game
 
 
 # ------------------------------------------------------------- load/check --
@@ -145,16 +153,29 @@ def _column_map(path, fieldnames):
                ", ".join(missing),
                ", ".join(n for n in fieldnames if n) or "(none)",
                ", ".join(REQUIRED_COLUMNS)))
-    return {c: found[c.lower()] for c in REQUIRED_COLUMNS}
+    return {c: found[c.lower()] for c in REQUIRED_COLUMNS + OPTIONAL_COLUMNS
+            if c.lower() in found}
+
+
+def _picture_path(csv_path, text):
+    """The picture file named in the Picture column. A relative path is taken
+    from the CSV file's folder."""
+    picture = os.path.expanduser(text)
+    if not os.path.isabs(picture):
+        picture = os.path.join(os.path.dirname(os.path.abspath(csv_path)), picture)
+    return picture
 
 
 def load_questions(path):
-    """Read and validate a question set. Raises QuestionFileError with advice."""
+    """Read and validate a question set. Raises QuestionFileError with advice.
+    Pictures that are missing or not PNG/JPG are left out and noted in
+    board.warnings rather than stopping the game."""
     fieldnames, raw = _read_rows(path)
     columns = _column_map(path, fieldnames)
-    get = lambda row, key: (row.get(columns[key]) or "").strip()
+    get = lambda row, key: (row.get(columns[key]) or "").strip() if key in columns else ""
 
     problems = []
+    warnings = []
     questions = {}
     seen_on_line = {}
     categories = []
@@ -191,7 +212,18 @@ def load_questions(path):
                             % (line, r, c, seen_on_line[(r, c)]))
             continue
         seen_on_line[(r, c)] = line
-        questions[(r, c)] = {"question": question, "answer": answer}
+        picture = None
+        if get(row, "Picture"):
+            picture = _picture_path(path, get(row, "Picture"))
+            if os.path.splitext(picture)[1].lower() not in PICTURE_TYPES:
+                warnings.append("line %d: Row %d, Col %d picture is not a PNG or JPG file: %s"
+                                % (line, r, c, picture))
+                picture = None
+            elif not os.path.isfile(picture):
+                warnings.append("line %d: Row %d, Col %d picture not found: %s"
+                                % (line, r, c, picture))
+                picture = None
+        questions[(r, c)] = {"question": question, "answer": answer, "picture": picture}
 
     if problems:
         raise QuestionFileError(_problem_report(path, problems))
@@ -235,7 +267,7 @@ def load_questions(path):
             note="A %d x %d board needs all %d squares filled in."
                  % (n_rows, n_cols, n_rows * n_cols)))
 
-    return Board(categories, questions, n_rows, n_cols, path)
+    return Board(categories, questions, n_rows, n_cols, path, warnings)
 
 
 def score_change(points, correct, steal, mode):
@@ -500,14 +532,27 @@ class Game(object):
         if self.state == "steal":
             heading += "  -  STEALS"
         draw_text(self.screen, heading, (0, 20, self.w, 46), GOLD, 34, 14, True)
-        draw_text(self.screen, item["question"],
-                  (60, top * 0.13, self.w - 120, top * 0.40), WHITE, 54, 16, True)
+        picture = item.get("picture")
+        if picture and draw_picture(self.screen, picture,
+                                    (60, top * 0.10, self.w - 120, top * 0.53)):
+            # the picture takes most of the space; question, timer and answer
+            # squeeze in below it
+            question_box = (60, top * 0.63, self.w - 120, top * 0.085)
+            timer_box = (0, top * 0.72, self.w, top * 0.16)
+            answer_box = (60, top * 0.715, self.w - 120, top * 0.075)
+            question_size = answer_size = 40
+        else:
+            question_box = (60, top * 0.13, self.w - 120, top * 0.40)
+            timer_box = (0, top * 0.62, self.w, top * 0.16)
+            answer_box = (60, top * 0.55, self.w - 120, top * 0.26)
+            question_size, answer_size = 54, 46
+        draw_text(self.screen, item["question"], question_box, WHITE, question_size, 16, True)
 
         if self.state == "question":
             left = self.time_left()
             colour = WHITE if self.paused else (RED if left <= 5 else GOLD)
             text = "PAUSED" if self.paused else ("TIME UP" if left == 0 else "%0.0f" % left)
-            draw_text(self.screen, text, (0, top * 0.62, self.w, top * 0.16), colour, 80, 24, True)
+            draw_text(self.screen, text, timer_box, colour, 80, 24, True)
             hint = ("paused - press P to resume" if self.paused else
                     "click anywhere or press SPACE to reveal the answer  -  P to pause")
             draw_text(self.screen, hint, (0, top - 50, self.w, 40), WHITE, 24, 12)
@@ -516,8 +561,7 @@ class Game(object):
             self.draw_score_bar()
             return
 
-        draw_text(self.screen, item["answer"],
-                  (60, top * 0.55, self.w - 120, top * 0.26), GOLD, 46, 14, True)
+        draw_text(self.screen, item["answer"], answer_box, GOLD, answer_size, 14, True)
         if self.state == "answer":
             right, wrong = self.button_rects()
             loss = self.award(False)
@@ -810,6 +854,13 @@ def main(argv=None):
     except QuestionFileError as err:
         sys.stderr.write("\n%s\n\n" % err)
         return 2
+
+    for number, board in enumerate(boards, 1):
+        if board.warnings:
+            prefix = "Round %d: " % number if len(boards) > 1 else ""
+            sys.stderr.write("%sWarning - %s: these questions will be shown without a "
+                             "picture:\n%s\n" % (prefix, os.path.basename(board.path),
+                                                 "\n".join("  - " + w for w in board.warnings)))
 
     if args.check:
         for number, board in enumerate(boards, 1):
